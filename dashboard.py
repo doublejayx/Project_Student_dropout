@@ -105,7 +105,7 @@ model, X, y = load_model_and_data()
 def make_predictions(_model, X, y):
     """Generates predictions and creates the result DataFrame."""
     proba = _model.predict_proba(X)[:, 1]
-    y_pred = _model.predict(X)
+    y_pred_result = _model.predict(X)
     
     def assign_risk(p):
         if p > 0.7: return "High Risk"
@@ -118,9 +118,19 @@ def make_predictions(_model, X, y):
     df_result["True Label"] = y.values
     df_result["Probability"] = proba
     df_result["Risk Level"] = warnings
-    return df_result, y_pred
+    return df_result, y_pred_result
 
 df_result, y_pred = make_predictions(model, X, y)
+
+# --- Model Performance Metrics Calculation ---
+cm = confusion_matrix(y, y_pred)
+tn, fp, fn, tp = cm.ravel()
+
+accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
+precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
 
 # --- UI Customization ---
 RISK_COLORS = {
@@ -131,6 +141,7 @@ RISK_COLORS = {
 
 # --- Sidebar ---
 with st.sidebar:
+    st.image("photo/student2.png", width='stretch')
     st.title("⚙️ Control Panel")
     st.markdown("เลือกกลุ่มความเสี่ยงเพื่อกรองข้อมูลและไฮไลท์กราฟ")
     risk_filter = st.selectbox(
@@ -150,6 +161,20 @@ st.markdown("""
 - 🟢 **Low Risk**: มีความเสี่ยงต่ำ แต่ยังคงต้องเฝ้าระวัง
 """)
 st.divider()
+
+# --- Model Performance KPIs ---
+st.subheader("⚙️ ภาพรวมประสิทธิภาพโมเดล")
+kpi_cols = st.columns(4)
+with kpi_cols[0]:
+    st.metric(label="Accuracy", value=f"{accuracy:.2%}")
+with kpi_cols[1]:
+    st.metric(label="Precision", value=f"{precision:.2%}")
+with kpi_cols[2]:
+    st.metric(label="Recall", value=f"{recall:.2%}")
+with kpi_cols[3]:
+    st.metric(label="F1-Score", value=f"{f1_score:.2%}")
+st.divider()
+
 
 # --- Filtered DataFrame ---
 filtered_df = df_result[df_result["Risk Level"] == risk_filter] if risk_filter != "All" else df_result
@@ -219,9 +244,9 @@ with col2:
         st.plotly_chart(fig_bar, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-# --- Model Performance Analysis ---
+# --- Model Deep Dive Analysis ---
 st.divider()
-st.subheader("🔬 วิเคราะห์ประสิทธิภาพโมเดล")
+st.subheader("🔬 วิเคราะห์โมเดลเชิงลึก (Model Deep Dive)")
 col3, col4 = st.columns(2)
 
 with col3:
@@ -229,14 +254,12 @@ with col3:
         st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
         st.markdown(f"<h6>📈 การกระจายตัวความน่าจะเป็น ({risk_filter})</h6>", unsafe_allow_html=True)
         
-        # Use filtered_df for the histogram
         fig_hist = px.histogram(
             filtered_df, x="Probability", nbins=30,
-            title=f"Distribution for {risk_filter} Risk Group",
             labels={"Probability": "Predicted Probability"},
             color_discrete_sequence=[RISK_COLORS.get(risk_filter, '#1E3A8A')] if risk_filter != "All" else ['#1E3A8A']
         )
-        fig_hist.update_layout(yaxis_title="Number of Students", showlegend=False)
+        fig_hist.update_layout(yaxis_title="Number of Students", showlegend=False, title_text=None)
         st.plotly_chart(fig_hist, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -244,31 +267,47 @@ with col4:
     with st.container(border=False):
         st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
         st.markdown("<h6>🧮 Confusion Matrix (Overall)</h6>", unsafe_allow_html=True)
-        cm = confusion_matrix(y, y_pred)
-        tn, fp, fn, tp = cm.ravel()
-        
-        accuracy = (tp + tn) / (tp + tn + fp + fn)
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-
         cm_labels = ["Not Dropout", "Dropout"]
         fig_cm = go.Figure(data=go.Heatmap(
             z=cm, x=cm_labels, y=cm_labels, text=cm, texttemplate="%{text}", colorscale='Blues'
         ))
         fig_cm.update_layout(xaxis_title="Predicted Label", yaxis_title="True Label")
         st.plotly_chart(fig_cm, use_container_width=True)
-
-        st.markdown(f"""
-        - **Accuracy:** {accuracy:.2%}
-        - **Precision:** {precision:.2%}
-        - **Recall:** {recall:.2%}
-        """)
         st.markdown("</div>", unsafe_allow_html=True)
 
 
+# --- Feature Importance Analysis ---
+st.divider()
+st.subheader("🌟 ปัจจัยสำคัญที่ส่งผลต่อความเสี่ยง (Key Risk Factors)")
+
+with st.container():
+    st.markdown("<div class='chart-container'>", unsafe_allow_html=True)
+    st.markdown("กราฟนี้แสดงปัจจัย 15 อันดับแรกที่มีผลต่อการทำนายของโมเดลมากที่สุด ยิ่งค่า **Importance Score** สูง แสดงว่าปัจจัยนั้นยิ่งมีความสำคัญ")
+    
+    if hasattr(model, "feature_importances_"):
+        importances = model.feature_importances_
+        feat_importances = pd.Series(importances, index=X.columns)
+        top_features = feat_importances.nlargest(15).sort_values(ascending=True)
+
+        fig_feat = go.Figure()
+        fig_feat.add_trace(go.Bar(
+            x=top_features.values, y=top_features.index, orientation='h',
+            marker=dict(color=top_features.values, colorscale="Blues_r", reversescale=True),
+        ))
+        fig_feat.update_layout(
+            title="Top 15 Most Important Features",
+            xaxis_title="Importance Score", yaxis_title=None,
+            height=500
+        )
+        st.plotly_chart(fig_feat, use_container_width=True)
+    else:
+        st.info("⚠️ โมเดลนี้ไม่รองรับการแสดง Feature Importance (เช่น Logistic Regression, KNN)")
+        
+    st.markdown("</div>", unsafe_allow_html=True)
+
 # --- Data Table and Download ---
 st.divider()
-with st.expander("📋 รายชื่อนักเรียนและความเสี่ยง (คลิกเพื่อแสดง/ซ่อน)", expanded=True):
+with st.expander("📋 รายชื่อนักเรียนและความเสี่ยง (คลิกเพื่อแสดง/ซ่อน)", expanded=False):
     st.markdown(f"**ตารางแสดงผลสำหรับกลุ่ม: `{risk_filter}`** (แสดงผล 50 อันดับแรก)")
     st.dataframe(filtered_df.head(50), width='stretch')
     
