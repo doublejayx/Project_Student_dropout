@@ -141,7 +141,7 @@ RISK_COLORS = {
 
 # --- Sidebar ---
 with st.sidebar:
-    st.image("photo/student2.png", width='stretch')
+    st.image("photo/student1.png", width='stretch')
     st.title("⚙️ Control Panel")
     st.markdown("เลือกกลุ่มความเสี่ยงเพื่อกรองข้อมูลและไฮไลท์กราฟ")
     risk_filter = st.selectbox(
